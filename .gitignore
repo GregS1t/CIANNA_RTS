@@ -1,0 +1,26 @@
+# .Gitignore file
+
+*/__pycache__/*
+*.pyc
+stash/
+training_logs/
+output/
+datasets/
+*.old
+*.OLD
+*.png
+*.pth
+*.txt
+*.nbc/
+.vscode/
+model_DDPM*
+*.fits
+net0_rts*
+temp*
+output*
+.env
+*.log
+
+server/JOBS/*
+server/data/*.json
+server/data/log_backups/*.json

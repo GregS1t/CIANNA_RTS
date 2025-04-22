@@ -1,0 +1,413 @@
+#!/usr/bin/env python
+
+# Code to apply the YOLO algorithm to the RACS data
+# This code is based on the code of Adrien Anthore
+# 
+# Author: Grégory Sainton
+# Date: 07/12/2023
+# Version: 0.2 - Look for the simplest way to apply the YOLO algorithm to the RACS data
+# Dependencies: Python 3.6.7, CIANNA, aux_fct, astropy, matplotlib
+
+
+# Basics imports
+import sys, os
+import xml.etree.ElementTree as ET
+
+import numpy as np
+
+from astropy.io import fits
+from astropy.wcs import WCS
+
+from IPython.display import display
+
+import time
+import json
+import logging
+
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+from matplotlib import gridspec
+from matplotlib import rc
+
+from pprint import pprint
+import pandas as pd
+
+from data_gen import *
+
+logging.basicConfig(filename='CIANNA_RTS_data_analysis.log',level=logging.INFO, 
+                    format='%(asctime)s %(levelname)s %(message)s')
+logging.info('Started')
+
+with open('yolo_cianna_detect/params/yolo_rts.json', 'r') as config_file:
+    config = json.load(config_file)
+
+PATH2CIANNA = config.get("PATH2CIANNA")
+CIANNA_RTS_DIR = config.get("CIANNA_RTS_DIR")
+
+sys.path.insert(0,PATH2CIANNA)
+
+try:
+    import CIANNA as cnn
+    logging.info("CIANNA is installed")
+except ImportError:
+    logging.error("CIANNA is not installed")
+    logging.info("END OF THE PROGRAM")
+    raise ImportError("CIANNA is not installed")
+
+from data_gen import *
+
+def read_yolo_ciana_xml(file_path):
+    """
+    Reads a YOLO_CIANNA XML file and returns its contents as a dictionary.
+    
+    Parameters:
+        file_path (str): Path to the XML file.
+        
+    Returns:
+        dict: A dictionary containing the parsed XML data.
+    """
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        
+        # Extract USER_ID and Timestamp
+        user_id = root.find('USER_ID').text
+        timestamp = root.find('Timestamp').text
+
+        # Extract Coordinates
+        coordinates_elem = root.find('Coordinates')
+        coordinates = {
+            'RA': float(coordinates_elem.find('RA').text),
+            'DEC': float(coordinates_elem.find('DEC').text),
+            'H': int(coordinates_elem.find('H').text),
+            'W': int(coordinates_elem.find('W').text)
+        }
+
+        # Extract Image Path
+        image_path = root.find('Image/Path').text
+
+        # Extract YOLO_Model NamePATH2CIANNA = '/home/gsainton/01_Observatoire/CIANNA/src/build/lib.linux-x86_64-cpython-311' CIANNA_RTS_DIR = '/home/gsainton/01_Observatoire/CIANNA_RTS/C_SERVER'
+        yolo_model = root.find('YOLO_Model/Name').text
+
+        # Extract Quantization
+        quantization = root.find('Quantization').text
+
+        # Combine all the extracted information into a dictionary
+        data = {
+            'USER_ID': user_id,
+            'Timestamp': timestamp,
+            'Coordinates': coordinates,
+            'Image_Path': image_path,
+            'YOLO_Model': yolo_model,
+            'Quantization': quantization
+        }
+
+        return data
+
+    except ET.ParseError as pe:
+        print(f"Error parsing the XML file: {pe}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+def check_gpu(verbose=True):
+    """
+    Check if the GPU is available and if CUDA and Cudnn are installed
+    """
+    if verbose:
+        print("CHECK GPU")
+        print("----------------------------------------")
+    nvidia_smi = os.system('nvidia-smi')
+    # add to log file
+
+    if nvidia_smi != "":
+        print("nvidia-smi is installed")
+        logging.info("nvidia-smi is installed")
+    else:
+        print("nvidia-smi is not installed")
+        logging.info("nvidia-smi is not installed")
+    # add to log file
+    
+
+    print(" ")
+    print("CHECK CUDA")
+    print("----------------------------------------")
+    if os.path.isfile('/usr/local/cuda/bin/nvcc'):
+        print("\t>CUDA is installed")
+        logging.info("CUDA is installed")
+
+    else:
+        print("CUDA is not installed")
+    print(" ")
+    print("CHECK Cudnn")
+    print("----------------------------------------")
+    if os.path.isfile('/usr/local/cuda/include/cudnn.h'):
+        print("\t>Cudnn is installed")
+        logging.info("Cudnn is installed")
+        
+    else:
+        print("Cudnn is not installed")
+        logging.info("Cudnn is not installed")
+
+def get_fits_list(path2data):
+    """
+    Get the list of the fits files in the path2data directory
+    """
+    # Get the list of the files in path2data
+    fits_list = os.listdir(path2data)
+    # Keep only the fits files
+    fits_list = [f for f in fits_list if "fits" in f]
+
+    # if list empty, raise an error
+    if len(fits_list) == 0:
+        logging.error("No fits file in the directory")
+        logging.info("END OF THE PROGRAM")
+        raise ValueError("No fits file in the directory")
+    else:
+        for fits_file in fits_list:
+            # Open the file
+            hdul = fits.open(os.path.join(path2data, fits_file))
+            print(f"{fits_file} | {hdul[0].data.shape} | \
+                  {os.path.getsize(os.path.join(path2data, fits_file))/1024/1024} MB")
+            hdul.close()
+    return fits_list
+
+def read_json_file(json_file):
+    with open(json_file, 'r') as f:
+        params = json.load(f)
+    return params
+
+
+# ------------------------------------------------------------------------------
+# Main part of the code
+# ------------------------------------------------------------------------------
+
+
+if __name__ == "__main__":
+   
+    if len(sys.argv) < 4:
+        print("Usage: process_xml.py <xml_file> <fits_file> <process_id>")
+        sys.exit(1)
+
+    # Read the parameters from the XML file
+    xml_file = sys.argv[1]
+    client_params = read_yolo_ciana_xml(xml_file)
+    fits_file = sys.argv[2]
+    process_id = sys.argv[3]
+
+    #########################################################################
+    # USER INPUT
+
+    path2analysis = os.path.join(CIANNA_RTS_DIR,'yolo_cianna_detect')
+    # Check if it exists otherwise raise an error
+    if not os.path.exists(path2analysis):
+        logging.error(f"{path2analysis} does not exist")
+        logging.info("END OF THE PROGRAM")
+        raise ValueError(f"{path2analysis} does not exist")
+    
+    # Path to the models
+    path2models = os.path.join(path2analysis, 'net_save')
+    
+    selected_model = client_params.get("YOLO_Model")
+    print(f"Selected model: {selected_model}")
+    print(f"FITS file: {fits_file}")
+    quantization = client_params.get("Quantization")
+    print(f"Quantization: {quantization}")
+    # Path to output directory
+    output_dir = os.path.join(path2analysis, 'output')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Data clipping
+    clip_min = 99.4
+    clip_max = 99.8
+
+    #
+    #########################################################################
+    
+    print("\nCHECK DATA TO WORK WITH: ")
+    print("----------------------------------------")
+  
+
+    patch_shift = 240         # Shift between two tiles
+    orig_offset = 128         # Offset of the original image
+    overlap     = image_size - patch_shift # Overlap between two tiles
+
+    max_nb_obj_per_image = 280 
+
+    #Size priors for all possible boxes per grid. element
+    prior_w = f_ar([6.0,6.0,6.0,6.0,6.0,6.0,12.0,12.0,24.0])
+    prior_h = f_ar([6.0,6.0,6.0,6.0,6.0,6.0,12.0,12.0,24.0])
+    prior_size = np.vstack((prior_w, prior_h))
+
+    #No obj probability prior to rebalance the size distribution
+    prior_noobj_prob = f_ar([0.2,0.2,0.2,0.2,0.2,0.2,0.02,0.02,0.02])
+
+    #Relative scaling of each extra paramater
+    param_ind_scales = f_ar([2.0,2.0,1.0,0.5,0.5])
+    nb_param = 5 # additionnal param. For SDC1 [Flux, Bmaj, Bmin, Cos(PA), Sin(PA)]
+    outdim = 1 + max_nb_obj_per_image*(7 + nb_param + 1)
+
+    # inference_only = 0 for training, 1 for inference
+    # Flag for inference-only mode. The default is 0. When set to 1, 
+    # all the variables and arrays only useful for training are not allocated. 
+    # This is useful for the deployment of trained networks on lighter systems.
+    
+    #check_gpu()
+
+    cnn.init(in_dim=i_ar([image_size,image_size]), in_nb_ch=1,
+             out_dim=outdim, bias=0.1, b_size=8, comp_meth='C_CUDA', 
+             inference_only=1, dynamic_load=1, mixed_precision=quantization,
+             adv_size=35)
+
+    logging.info("CIANNA is initialized")
+    
+    nb_yolo_filters = cnn.set_yolo_params(no_override=0, raw_output=1)
+    
+    logging.info(f"CIANNA trained model {selected_model} loading")
+    cnn.load(os.path.join(path2models, selected_model), 0, bin=1)
+
+
+    hdul = fits.open(fits_file)
+    full_img = hdul[0].data[0,0]              # Drop extra axes
+    wcs_img = WCS(hdul[0].header)
+    wcs_img = wcs_img.dropaxis(2).dropaxis(2) # Drop extra axes
+    hdul.close()
+    
+    logging.info(f"Image {fits_file} loaded")
+    logging.info(f"\tShape: {full_img.shape}")
+    logging.info(f"\tSize: {full_img.size}")
+    logging.info(f"\tWCS shape: {wcs_img.pixel_shape}")
+    
+    #sys.exit("STOP FOR NOW...")
+
+    # Data clipping    
+    min_pix = np.percentile(full_img, clip_min)
+    max_pix = np.percentile(full_img, clip_max)
+
+    map_pixel_size = np.shape(full_img)[0]
+    size_px = map_pixel_size
+    size_py = np.shape(full_img)[1]
+
+    # Define the number of tiles in x and y
+    nb_area_w = int((map_pixel_size-orig_offset)/patch_shift) + 1
+    nb_area_h = int((map_pixel_size-orig_offset)/patch_shift) + 1
+
+    nb_images_all = nb_area_w * nb_area_h
+    print("Number of patches:", nb_images_all)
+
+    # Data clipping
+    full_data_norm = np.clip(full_img, min_pix, max_pix)
+    print(f"\tClipping the image between {clip_min} and {clip_max} percentiles")
+    
+    # Data normalization then between 0 and 1
+    full_data_norm = (full_data_norm - min_pix) /(max_pix-min_pix)
+    full_data_norm = np.tanh(3.0*full_data_norm)
+    print(f"\tNormalizing the image between 0 and 1 with tanh fct")
+
+
+
+    # Generate to empty vectors containing the predictions
+    # Prototypes to create the dataset
+    # CIANNA.create_dataset(dataset, size, input, target,
+    #                        network=nb_networks-1, silent=0)
+
+    input_data = np.zeros((nb_images_all, image_size*image_size),
+                        dtype="float32")
+    targets = np.zeros((nb_images_all, outdim),
+                        dtype="float32")
+    patch = np.zeros((image_size,image_size),
+                        dtype="float32")
+
+    for i_d in range(0, nb_images_all):
+
+        p_y = int(i_d/nb_area_w) # y index of the tile
+        p_x = int(i_d%nb_area_w) # x index of the tile
+
+        # Coordinates of the tile
+        xmin = p_x * patch_shift - orig_offset ; xmax = xmin + image_size
+        ymin = p_y * patch_shift - orig_offset ; ymax = ymin + image_size
+
+        px_min = 0; px_max = image_size
+        py_min = 0; py_max = image_size
+
+        set_zero = 0
+        if(xmin < 0):
+            px_min = -xmin
+            xmin = 0
+            set_zero = 1
+        if(ymin < 0):
+            py_min = -ymin
+            ymin = 0
+            set_zero = 1
+        if(xmax > size_px):
+            px_max = image_size - (xmax - size_px)
+            xmax = size_px
+            set_zero = 1
+        if(ymax > size_py):
+            py_max = image_size - (ymax - size_py)
+            ymax = size_py
+            set_zero = 1
+
+        if set_zero == 0:
+                patch[:,:] = 0.0
+
+        patch[px_min:px_max,py_min:py_max] = np.flip(full_data_norm[xmin:xmax,ymin:ymax], axis=0)
+        input_data[i_d,:] = patch.flatten("C")
+
+    cnn.create_dataset("TEST", nb_images_all, input_data[:,:], targets[:,:])
+    cnn.forward(repeat=1, no_error=1, saving=2, drop_mode="AVG_MODEL")
+
+    os.rename("./fwd_res/net0_0000.dat",
+                "./fwd_res/net0_rts_"+process_id+".dat")
+    
+    cnn.delete_dataset("TEST")
+    
+
+
+    # # Test the output file : 
+
+    # pred_data = np.fromfile("fwd_res/net0_0000.dat", dtype="float32")
+
+    # #Repeat corresponds to the number of MC_MODEL realization
+    # repeat = 1
+    # predict = np.reshape(pred_data, (repeat, nb_area_h, nb_area_w, 
+    #                                  nb_box*(8+nb_param),yolo_nb_reg,
+    #                                  yolo_nb_reg))
+    # #Only keep the mean, but any realization statistic can be computed here
+    # predict = np.mean(predict, axis=0)
+
+    # print (np.shape(predict))
+
+    # # # Get the predictions
+
+    # final_boxes = []
+    # c_tile = np.zeros((yolo_nb_reg*yolo_nb_reg*nb_box,(6+1+nb_param+1)),dtype="float32")
+    # c_tile_kept = np.zeros((yolo_nb_reg*yolo_nb_reg*nb_box,(6+1+nb_param+1)),dtype="float32")
+    # c_box = np.zeros((6+1+nb_param+1),dtype="float32")
+    # patch = np.zeros((fwd_image_size, fwd_image_size), dtype="float32")
+
+    # box_count_per_reg_hist = np.zeros((nb_box+1), dtype="int")
+
+    # cumul_filter_box = 0; cumul_post_nms = 0
+
+    # for ph in tqdm(range(0, nb_area_h)):
+    #     for pw in tqdm(range(0, nb_area_w)):
+    #         c_tile[:,:] = 0.0; c_tile_kept[:,:] = 0.0
+
+    #         p_x = pw; p_y = ph
+
+    #         xmin = p_x*patch_shift - orig_offset
+    #         xmax = p_x*patch_shift + fwd_image_size - orig_offset
+    #         ymin = p_y*patch_shift - orig_offset
+    #         ymax = p_y*patch_shift + fwd_image_size - orig_offset
+
+    #         px_min = 0; px_max = fwd_image_size
+    #         py_min = 0; py_max = fwd_image_size
+
+    #         if(ph == 0 or ph == nb_area_h-1 or pw == 0 or pw == nb_area_w-1):
+    #             patch[:,:] = 0.0
+    #         else:
+    #             patch[:,:] = full_data_norm[ymin:ymax,xmin:xmax]
+
+    #         c_pred = predict[ph,pw,:,:,:]

@@ -1,0 +1,15 @@
+<CIANNAModels>
+<LastUpdate>2025-02-04-14:21:00</LastUpdate>
+  <CIANNAVersion>1.0.0</CIANNAVersion>
+  <Model id="net0_s1800.dat">	  
+    <Name>net0_s1800.dat</Name>
+    <ReleaseDate>2025-02-01</ReleaseDate>
+    <Dataset>
+      <Name>SKA SDC1 Data</Name>
+      <Description>Synthethic data made for SKA Data Challenge 2</Description>
+      <ParamNumber>3*10^6</ParamNumber>
+    </Dataset>
+    <CheckpointPath>./net_save/net0_s1800.dat</CheckpointPath>
+    <Comments>Model trained with simulated SKA data.</Comments>
+  </Model>
+</CIANNAModels>

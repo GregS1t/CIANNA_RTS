@@ -1,0 +1,24 @@
+{
+  "PATH2CIANNA": "/home/gsainton/01_Observatoire/CIANNA/src/build/lib.linux-x86_64-cpython-311",
+  "CIANNA_RTS_DIR": "/home/gsainton/01_Observatoire/CIANNA_RTS",
+  "model_dir": "/home/gsainton/01_Observatoire/CIANNA_RTS/server/net_save",
+  "JOBS": {
+    "WAITING": "data/WAITING",
+    "ON_GOING": "data/ON_GOING",
+    "COMPLETED": "data/COMPLETED"
+  },
+  "logging": {
+    "filename": "CIANNA_RTS_data_analysis.log",
+    "level": "INFO",
+    "format": "%(asctime)s %(levelname)s %(message)s"
+  },
+  "image": {
+    "clip_min": 99.4,
+    "clip_max": 99.8
+  },
+  "patch_params": {
+    "patch_shift": 240,
+    "orig_offset": 128
+  }
+}
+

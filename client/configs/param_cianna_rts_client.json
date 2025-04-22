@@ -1,0 +1,6 @@
+{
+    "SERVER_URL":"http://145.238.67.60:3000",
+    "URL_MODELS":"145.238.67.60:3000/models/CIANNA_models.xml",
+    "LOCAL_FILE_MODELS": "models/CIANNA_models.xml",
+    "CLIENT_CONNEXION": "local"
+}
