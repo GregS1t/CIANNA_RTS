@@ -1,6 +1,6 @@
 
-import os, shutil, subprocess
-
+import os, shutil, subprocess, sys
+import argparse
 import uuid
 
 from threading import Thread
@@ -11,6 +11,7 @@ from flask import (Flask, request, jsonify, send_from_directory,
                    send_file, abort)
 
 # Importing custom modules
+
 from src.utils.job_logger import log_new_job, load_job_log, update_job_status
 from src.processing.pipeline import run_prediction_job
 
@@ -209,4 +210,9 @@ def download_result(process_id):
 
 
 if __name__ == '__main__':
-    app.run(port=3000, debug=True, host="0.0.0.0")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=3000, help='Port to run the Flask server on')
+    args = parser.parse_args()
+
+    app.run(port=args.port, debug=True, host="0.0.0.0")

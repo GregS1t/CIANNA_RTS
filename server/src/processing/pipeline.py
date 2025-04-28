@@ -1,4 +1,4 @@
-import os
+import os, json
 import shutil
 import numpy as np
 from datetime import datetime
@@ -13,18 +13,33 @@ from src.utils.job_logger import update_job_status, load_job_log
 # GET INFO FROM CONFIG FILE
 # 
 
-PARAMS_PATH = os.path.join(os.path.dirname(__file__), '../params/yolo_rts.json')
+PARAMS_PATH = os.path.join(os.path.dirname(__file__), '../../params/yolo_rts.json')
 with open(PARAMS_PATH, 'r') as f:
     CONFIG = json.load(f)
 
+sys.path.insert(0, CONFIG["PATH2CIANNA"]) # To declare CIANNA path
+
+SERVER_DIR = CONFIG.get("SERVER_DIR", os.path.dirname(__file__))
+
 MODEL_ROOT = CONFIG.get("CIANNA_RTS_DIR", ".")
 MODEL_DIR = CONFIG.get("model_dir", os.path.join(MODEL_ROOT, "net_save"))
+
 JOBS_CONFIG = CONFIG.get("JOBS", {})
 
-JOBS_WAITING = JOBS_CONFIG.get("WAITING", os.path.join(MODEL_ROOT, "data", "WAITING"))
-JOBS_ON_GOING = JOBS_CONFIG.get("ON_GOING", os.path.join(MODEL_ROOT, "data", "ON_GOING"))
-JOBS_COMPLETED = JOBS_CONFIG.get("COMPLETED", os.path.join(MODEL_ROOT, "data", "COMPLETED"))
-
+JOBS_WAITING = os.path.join(SERVER_DIR,
+                            JOBS_CONFIG.get("WAITING",
+                                            os.path.join(MODEL_ROOT,
+                                                         "data",
+                                                         "WAITING")))
+JOBS_ON_GOING = os.path.join(SERVER_DIR,
+                             JOBS_CONFIG.get("ON_GOING",
+                                             os.path.join(MODEL_ROOT,
+                                                          "data",
+                                                          "ON_GOING")))
+JOBS_COMPLETED = os.path.join(SERVER_DIR,
+                              JOBS_CONFIG.get("COMPLETED", os.path.join(MODEL_ROOT,
+                                                           "data",
+                                                           "COMPLETED")))
 
 
 def prepare_job_directory(base_output_dir, process_id):
@@ -89,8 +104,7 @@ def validate_model_path(model_name, path2models_root):
     Construct and verify the full path to the model.
 
     """
-    model_path = os.path.join(path2models_root, "yolo_cianna_detect",
-                              "net_save", model_name)
+    model_path = os.path.join(path2models_root, model_name)
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     print(f"[MODEL] Model found at: {model_path}")
@@ -145,7 +159,8 @@ def run_prediction(process_id, job_dir, fits_file, model_path, params):
     nb_area_h = int((map_pixel_size - 128) / 240) + 1
     nb_images_all = nb_area_w * nb_area_h
 
-    input_data = np.zeros((nb_images_all, image_size * image_size), dtype="float32")
+    input_data = np.zeros((nb_images_all, image_size * image_size),
+                          dtype="float32")
     patch = np.zeros((image_size, image_size), dtype="float32")
 
     for i_d in range(nb_images_all):
@@ -189,17 +204,15 @@ def run_prediction(process_id, job_dir, fits_file, model_path, params):
     cnn.forward(repeat=1, no_error=1, saving=2, drop_mode="AVG_MODEL")
 
     pred_file = os.path.join(fwd_res_dir, f"net0_rts_{process_id}.dat")
-    if os.path.exists("net0_0000.dat"):
-        os.rename("net0_0000.dat", pred_file)
+
+    if os.path.exists(os.path.join(fwd_res_dir, "net0_0000.dat")):
+        os.rename(os.path.join(fwd_res_dir, "net0_0000.dat"), pred_file)
         print("[RUN] Prediction file saved.")
     else:
         raise FileNotFoundError("Prediction output file 'net0_0000.dat' not found.")
 
     cnn.delete_dataset("TEST")
     return pred_file
-
-
-
 
 #
 # Function to prepare the job directory
@@ -219,15 +232,21 @@ def run_prediction_job(process_id, xml_path, fits_path,
     print(f"[PIPELINE] Starting job {process_id}")
 
     try:
-        output_root = JOBS_ON_GOING
-        job_dir = prepare_job_directory(output_root, process_id)
-        params = parse_job_parameters(xml_path)
+        # Move full job directory from WAITING to ON_GOING
+        waiting_job_dir = os.path.join(JOBS_WAITING, process_id)
+        ongoing_job_dir = os.path.join(JOBS_ON_GOING, process_id)
+        shutil.move(waiting_job_dir, ongoing_job_dir)
+        print(f"[PIPELINE] Moved {waiting_job_dir} to {ongoing_job_dir}")
+
+        # Use the new location as the job directory
+        params = parse_job_parameters(os.path.join(ongoing_job_dir, os.path.basename(xml_path)))
         model_path = validate_model_path(params['model'], model_dir)
+        print(f"[PIPELINE] output_root: {JOBS_ON_GOING},\n job_dir: {ongoing_job_dir}")
 
         prediction_file = run_prediction(
             process_id,
-            job_dir,
-            fits_file=os.path.join(job_dir, params['fits_filename']),
+            ongoing_job_dir,
+            fits_file=os.path.join(ongoing_job_dir, "image.fits"), # All the images are named "image.fits"
             model_path=model_path,
             params=params
         )
@@ -239,10 +258,10 @@ def run_prediction_job(process_id, xml_path, fits_path,
             comment="Prediction completed",
             end_time=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         )
+
         # Move job directory to COMPLETED
         completed_dir = os.path.abspath(os.path.join(JOBS_COMPLETED, process_id))
-        shutil.move(job_dir, completed_dir)
-        shutil.move(job_dir, completed_dir)
+        shutil.move(ongoing_job_dir, completed_dir)
         print(f"[PIPELINE] Job {process_id} moved to COMPLETED.")
         return os.path.join(completed_dir, 'fwd_res', f"net0_rts_{process_id}.dat")
 

@@ -53,3 +53,50 @@ def update_cianna_models(url, local_file):
         return True
     else:
         sys.exit("Error: Unable to load the local file.")
+
+def get_model_info(xml_path, model_id):
+    """
+    Parses a CIANNA_models.xml file and retrieves the model information
+    for a given model ID.
+
+    Parameters
+    ----------
+    xml_path : str
+        Path to the XML file that contains CIANNA model definitions.
+    model_id : str
+        The identifier of the model to retrieve (from the 'id' attribute in
+        the <Model> tag).
+
+    Returns
+    -------
+    dict or None
+        A dictionary containing the model's parameters if found,
+        otherwise None.
+    """
+    if not os.path.exists(xml_path):
+        raise FileNotFoundError(f"XML file not found: {xml_path}")
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    for model in root.findall("Model"):
+        if model.attrib.get("id") == model_id:
+            info = {
+                "Name": model.findtext("Name"),
+                "ReleaseDate": model.findtext("ReleaseDate"),
+                "OriginalInputDim": model.findtext("OriginalInputDim"),
+                "MinInputDim": model.findtext("MinInputDim"),
+                "MaxInputDim": model.findtext("MaxInputDim"),
+                "YOLOGridElemDim": model.findtext("YOLOGridElemDim"),
+                "DataNormalization": model.findtext("DataNormalization"),
+                "DataQuantization": model.findtext("DataQuantization"),
+                "TrainingQuantization": model.findtext("TrainingQuantization"),
+                "InferenceQuantization": model.findtext("InferenceQuantization"),
+                "InferenceMode": model.findtext("InferenceMode"),
+                "InferencePatchShift": model.findtext("InferencePatchShift"),
+                "ReceptiveField": model.findtext("ReceptiveField"),
+                "CheckpointPath": model.findtext("CheckpointPath"),
+                "Comments": model.findtext("Comments"),
+            }
+            return info
+    return None 

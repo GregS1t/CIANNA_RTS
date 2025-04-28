@@ -1,11 +1,12 @@
 {
   "PATH2CIANNA": "/home/gsainton/01_Observatoire/CIANNA/src/build/lib.linux-x86_64-cpython-311",
   "CIANNA_RTS_DIR": "/home/gsainton/01_Observatoire/CIANNA_RTS",
+  "SERVER_DIR":"/home/gsainton/01_Observatoire/CIANNA_RTS/server",
   "model_dir": "/home/gsainton/01_Observatoire/CIANNA_RTS/server/net_save",
   "JOBS": {
-    "WAITING": "data/WAITING",
-    "ON_GOING": "data/ON_GOING",
-    "COMPLETED": "data/COMPLETED"
+    "WAITING": "JOBS/WAITING",
+    "ON_GOING": "JOBS/ON_GOING",
+    "COMPLETED": "JOBS/COMPLETED"
   },
   "logging": {
     "filename": "CIANNA_RTS_data_analysis.log",

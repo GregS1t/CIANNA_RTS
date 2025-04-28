@@ -1,15 +1,22 @@
-import os
+import os, sys
 import random
 import json
+
+
+
+sys.path.insert(0,
+                os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                             "..", "..")))
 from src.core.xml_utils import create_xml_param
 from src.core.file_transfer import send_xml_fits_to_server
 from src.services.server_comm import poll_for_completion, download_result
-from src.utils.cianna_xml_updater import update_cianna_models
+from src.utils.cianna_xml_updater import update_cianna_models, get_model_info
 from src.utils.ssh_tunnel import create_ssh_tunnel
+from src.utils.fits_utils import get_image_dim
 
 
 DESTINATION_FOLDER = "results"
-
+CONFIGS_DIR = os.path.join(os.getcwd(), 'client','configs')
 
 def load_config(config_path):
     """
@@ -35,39 +42,87 @@ def load_config(config_path):
     return config
 
 def emulate_client_request(server_url, image_path, request_number, config):
+    """
+    Simulates a client sending a request to a server with astronomical image data.
+
+    This function generates randomized parameters for a simulated observation 
+    (RA, DEC, bounding box dimensions), creates an XML-formatted request including 
+    user ID and model configuration, and sends it to the specified server. It logs 
+    the result of the request, including success or failure status.
+
+    Parameters:
+    ----------
+    server_url : str
+        The base URL of the server to which the request will be sent.
+    image_path : str
+        The path to the image file (typically a FITS file) to be sent.
+    request_number : int
+        A unique number used to differentiate this request and compute the user ID.
+    config : dict
+        A dictionary of configuration options, including:
+            - "YOLO_MODEL" (str, optional): Name of the YOLO model file to use.
+            - "QUANTIZATION" (str, optional): Type of quantization for the model.
+    """
+
     user_id = 2443423 + request_number
-    ra = random.uniform(0, 360)
+    ra  = random.uniform(0, 360)                            # Either the full image or a sub-image
     dec = random.uniform(-90, 90)
-    h = random.randint(50, 200)
-    w = random.randint(50, 200)
-    yolo_model = config.get("YOLO_MODEL", "net0_s1800.dat")
-    quantization = config.get("QUANTIZATION", "FP32C_FP32A")
-    
-    xml_data = create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model, quantization)
-    process_id = send_xml_fits_to_server(server_url, xml_data)
-    if process_id is None:
-        print(f"Error for request {request_number}")
+    h   = random.randint(50, 200)
+    w   = random.randint(50, 200)
+    yolo_model = "SDC1_Cornu_2024"  # Suppose to be selected by the user # Suppose to be selected by the user
+    quantization = "FP32C_FP32A"    # Suppose to be selected by the user
+
+
+    # Check if the image is compatible with the YOLO model
+    model_info = get_model_info(config.get("LOCAL_FILE_MODELS"), yolo_model)
+    # 
+    if model_info is None:
+        print(f"Error: Model {yolo_model} not found in the local XML file.")
+        return
+
     else:
-        print(f"Request {request_number} sent successfully with process ID: {process_id}")
-        # if poll_for_completion(server_url, process_id):
-        #     download_result(server_url, process_id,
-        #                     destination_folder=DESTINATION_FOLDER)
-        # else:
-        #     print(f"Error for request : {request_number}")
+        # Get the image dimensions
+        image_info = get_image_dim(image_path)
+        if image_info is None:
+            print(f"Error: Unable to read image dimensions from {image_path}.")
+            return
+        image_size = image_info.get('shape', (0, 0))
+        if image_size[0] < h or image_size[1] < w:
+            print(f"Error: Image dimensions {image_size} are smaller than the requested bounding box ({h}, {w}).")
+            return
+
+
+
+        xml_data = create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model, quantization)
+
+        process_id = send_xml_fits_to_server(server_url, xml_data)
+        if process_id is None:
+            print(f"[EMULATE] Error for request {request_number}")
+        else:
+            print(f"[EMULATE] Request {request_number} sent successfully with process ID: {process_id}")
+            # if poll_for_completion(server_url, process_id):
+            #     download_result(server_url, process_id,
+            #                     destination_folder=DESTINATION_FOLDER)
+            # else:
+            #     print(f"Error for request : {request_number}")
 
 def main():
     """
     Main function for the client.
 
     Steps:
-      1. Load the client configuration.
-      2. If a remote connection is specified, establish an SSH tunnel.
-      3. Update the local CIAnna models XML file by always retrieving the latest version.
-      4. Locate FITS images from the designated input folder.
-      5. Emulate a set number of client requests to the server.
+      - Load the client configuration.
+      - If a remote connection is specified, establish an SSH tunnel.
+      - Update the local CIAnna models XML file by always retrieving the latest version.
+      - Locate FITS images from the designated input folder.
+      - Emulate a set number of client requests to the server.
+
+      
+    Note:
+        - Vérifier sur le fichier FITS est compatible avec le modèle YOLO.
     """
     # Load configuration from JSON file
-    config = load_config("configs/param_cianna_rts_client.json")
+    config = load_config(os.path.join(CONFIGS_DIR,"param_cianna_rts_client.json"))
     
     # Path to the local Cianna models XML file
     local_models_file = config.get("LOCAL_FILE_MODELS")
@@ -103,7 +158,9 @@ def main():
         return
 
     # Get list if images for test
-    image_folder = "../../DIR_images" 
+    image_folder = os.path.expanduser(config.get("IMAGE_FOLDER", "~/01_Observatoire/DIR_images"))
+
+    print(f"Looking for images in {image_folder}...")
     images = [os.path.join(image_folder, img) for img in os.listdir(image_folder) if img.endswith(".fits")]
     if not images:
         print("No fits images in ", image_folder)
