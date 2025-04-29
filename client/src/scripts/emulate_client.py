@@ -2,7 +2,7 @@ import os, sys
 import random
 import json
 
-
+import requests
 
 sys.path.insert(0,
                 os.path.abspath(os.path.join(os.path.dirname(__file__),
@@ -75,6 +75,10 @@ def emulate_client_request(server_url, image_path, request_number, config):
 
     # Check if the image is compatible with the YOLO model
     model_info = get_model_info(config.get("LOCAL_FILE_MODELS"), yolo_model)
+
+    print(f"[emulate_client_request] Model info: {model_info}")
+
+
     # 
     if model_info is None:
         print(f"Error: Model {yolo_model} not found in the local XML file.")
@@ -92,19 +96,32 @@ def emulate_client_request(server_url, image_path, request_number, config):
             return
 
 
-
-        xml_data = create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model, quantization)
+        xml_data = create_xml_param(user_id, ra, dec, h, w, image_path, 
+                                    yolo_model, quantization, model_info.get("Name"))
 
         process_id = send_xml_fits_to_server(server_url, xml_data)
         if process_id is None:
-            print(f"[EMULATE] Error for request {request_number}")
+            print(f"[EMULATE] Error sending request {request_number}")
         else:
             print(f"[EMULATE] Request {request_number} sent successfully with process ID: {process_id}")
-            # if poll_for_completion(server_url, process_id):
-            #     download_result(server_url, process_id,
-            #                     destination_folder=DESTINATION_FOLDER)
-            # else:
-            #     print(f"Error for request : {request_number}")
+
+            try:
+                # Poll for job completion
+                print(f"[EMULATE] Polling for job {process_id} completion...")
+                if poll_for_completion(server_url, process_id):
+                    print(f"[EMULATE] Job {process_id} completed successfully.")
+                    print(f"[EMULATE] Downloading result for job {process_id}...")
+                    download_result(server_url, process_id, destination_folder=DESTINATION_FOLDER)
+                    print(f"[EMULATE] Result for request {request_number} downloaded successfully.")
+                else:
+                    print(f"[EMULATE] Error: Job {process_id} did not complete successfully.")
+
+            except requests.ConnectionError as e:
+                print(f"[EMULATE] Network error while polling/downloading: {e}")
+            except requests.Timeout as e:
+                print(f"[EMULATE] Timeout error: {e}")
+            except Exception as e:
+                print(f"[EMULATE] Unexpected error: {e}")
 
 def main():
     """

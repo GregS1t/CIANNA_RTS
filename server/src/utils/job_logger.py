@@ -45,7 +45,8 @@ def log_new_job(process_id, fits_path, reception_date):
             "model": "",
             "quantization": "",
             "priority": Job_priority,
-            "status": "WAITING",
+            "status": "PENDING",
+            "phase": "PENDING",
             "receptionDate": reception_date,
             "end_time": "",
             "comment": ""

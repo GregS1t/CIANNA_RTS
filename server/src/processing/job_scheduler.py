@@ -69,6 +69,7 @@ def run_next_job():
     fits_path = os.path.join(job_dir, fits_file)
 
     run_prediction_job(process_id, xml_path, fits_path, ON_GOING_DIR)
+    print(f"[SCHEDULER] Job {process_id} completed.")
 
 if __name__ == "__main__":
     run_next_job()

@@ -17,7 +17,7 @@
     <InferenceMode>"Grid"</InferenceMode>
     <InferenceQuantization>"FP16C_FP32A"</InferenceQuantization>
     <InferencePatchShift>240</InferencePatchShift>
-    <URL_Link>"zenodo.org/records..."<URL_Link>
+    <URL_Link>"zenodo.org/records..."</URL_Link>
     <TrainingDatasets>
       <Name>SKA SDC1 Data</Name>
         <Description>Synthethic data made for SKA Data Challenge 1</Description>

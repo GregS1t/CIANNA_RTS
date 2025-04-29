@@ -26,20 +26,31 @@ MODEL_DIR = CONFIG.get("model_dir", os.path.join(MODEL_ROOT, "net_save"))
 
 JOBS_CONFIG = CONFIG.get("JOBS", {})
 
-JOBS_WAITING = os.path.join(SERVER_DIR,
-                            JOBS_CONFIG.get("WAITING",
-                                            os.path.join(MODEL_ROOT,
-                                                         "data",
-                                                         "WAITING")))
-JOBS_ON_GOING = os.path.join(SERVER_DIR,
-                             JOBS_CONFIG.get("ON_GOING",
-                                             os.path.join(MODEL_ROOT,
-                                                          "data",
-                                                          "ON_GOING")))
+JOBS_PENDING = os.path.join(SERVER_DIR,
+                            JOBS_CONFIG.get("PENDING",
+                                            os.path.join(SERVER_DIR,
+                                                         "JOBS",
+                                                         "PENDING")))
+# JOBS_ON_GOING = os.path.join(SERVER_DIR,
+#                              JOBS_CONFIG.get("ON_GOING",
+#                                              os.path.join(MODEL_ROOT,
+#                                                           "data",
+#                                                           "ON_GOING")))
 JOBS_COMPLETED = os.path.join(SERVER_DIR,
-                              JOBS_CONFIG.get("COMPLETED", os.path.join(MODEL_ROOT,
-                                                           "data",
+                              JOBS_CONFIG.get("COMPLETED", os.path.join(SERVER_DIR,
+                                                           "JOBS",
                                                            "COMPLETED")))
+
+JOBS_EXECUTING = os.path.join(SERVER_DIR,
+                              JOBS_CONFIG.get("EXECUTING",
+                                              os.path.join(SERVER_DIR,
+                                                           "JOBS",
+                                                           "EXECUTING")))
+JOBS_ERROR = os.path.join(SERVER_DIR,
+                          JOBS_CONFIG.get("ERROR",
+                                          os.path.join(SERVER_DIR,
+                                                       "JOBS",
+                                                       "ERROR")))
 
 
 def prepare_job_directory(base_output_dir, process_id):
@@ -86,17 +97,18 @@ def parse_job_parameters(xml_path):
     image_path = root.find('Image/Path').text
     model = root.find('YOLO_Model/Name').text
     quantization = root.find('Quantization').text
+    filename = root.find('YOLO_Model/Filename').text
 
-    print(f"[XML] Parsed: user_id={user_id}, model={model}, image={image_path}")
-
+  
     return {
         'user_id': user_id,
         'timestamp': timestamp,
         'coordinates': coordinates,
         'image_path': image_path,
         'model': model,
+        'filename': filename,
         'quantization': quantization,
-        'fits_filename': os.path.basename(image_path)  # used for local path inside ON_GOING
+        'fits_filename': os.path.basename(image_path)  # used for local path inside EXECUTING
     }
 
 def validate_model_path(model_name, path2models_root):
@@ -105,8 +117,14 @@ def validate_model_path(model_name, path2models_root):
 
     """
     model_path = os.path.join(path2models_root, model_name)
+    print(["MODEL_PATH", model_path])
+    if not os.path.exists(path2models_root):
+        raise FileNotFoundError(f"Model root directory not found: {path2models_root}")
+    if not os.path.exists(os.path.dirname(model_path)):
+        raise FileNotFoundError(f"Model directory not found: {os.path.dirname(model_path)}")
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
+    
     print(f"[MODEL] Model found at: {model_path}")
     return model_path
 
@@ -207,12 +225,12 @@ def run_prediction(process_id, job_dir, fits_file, model_path, params):
 
     if os.path.exists(os.path.join(fwd_res_dir, "net0_0000.dat")):
         os.rename(os.path.join(fwd_res_dir, "net0_0000.dat"), pred_file)
-        print("[RUN] Prediction file saved.")
+        print("[RUN] Prediction file saved as:", pred_file)
     else:
         raise FileNotFoundError("Prediction output file 'net0_0000.dat' not found.")
 
     cnn.delete_dataset("TEST")
-    return pred_file
+    #return pred_file
 
 #
 # Function to prepare the job directory
@@ -227,26 +245,30 @@ def run_prediction_job(process_id, xml_path, fits_path,
         process_id (str): Unique job identifier.
         xml_path (str): Path to the XML configuration file.
         fits_path (str): Path to the FITS image.
-        base_output_dir (str): Root output directory for ON_GOING jobs.
+        base_output_dir (str): Root output directory for EXECUTING jobs.
     """
     print(f"[PIPELINE] Starting job {process_id}")
 
     try:
-        # Move full job directory from WAITING to ON_GOING
-        waiting_job_dir = os.path.join(JOBS_WAITING, process_id)
-        ongoing_job_dir = os.path.join(JOBS_ON_GOING, process_id)
-        shutil.move(waiting_job_dir, ongoing_job_dir)
-        print(f"[PIPELINE] Moved {waiting_job_dir} to {ongoing_job_dir}")
+        # Move full job directory from PENDING to EXECUTING
+        waiting_job_dir = os.path.join(JOBS_PENDING, process_id)
+        executing_job_dir = os.path.join(JOBS_EXECUTING, process_id)
+        shutil.move(waiting_job_dir, executing_job_dir)
+        print(f"[PIPELINE] Moved {waiting_job_dir} to {executing_job_dir}")
 
         # Use the new location as the job directory
-        params = parse_job_parameters(os.path.join(ongoing_job_dir, os.path.basename(xml_path)))
-        model_path = validate_model_path(params['model'], model_dir)
-        print(f"[PIPELINE] output_root: {JOBS_ON_GOING},\n job_dir: {ongoing_job_dir}")
+        params = parse_job_parameters(os.path.join(executing_job_dir,
+                                                   os.path.basename(xml_path)))
+        
+        print(f"[PIPELINE] Parsed parameters: {params}")
 
-        prediction_file = run_prediction(
+        model_path = validate_model_path(params['filename'], model_dir)
+        print(f"[PIPELINE] output_root: {JOBS_EXECUTING},\n job_dir: {executing_job_dir}")
+
+        run_prediction(
             process_id,
-            ongoing_job_dir,
-            fits_file=os.path.join(ongoing_job_dir, "image.fits"), # All the images are named "image.fits"
+            executing_job_dir,
+            fits_file=os.path.join(executing_job_dir, "image.fits"), # All the images are named "image.fits"
             model_path=model_path,
             params=params
         )
@@ -261,9 +283,10 @@ def run_prediction_job(process_id, xml_path, fits_path,
 
         # Move job directory to COMPLETED
         completed_dir = os.path.abspath(os.path.join(JOBS_COMPLETED, process_id))
-        shutil.move(ongoing_job_dir, completed_dir)
+        shutil.move(executing_job_dir, completed_dir)
         print(f"[PIPELINE] Job {process_id} moved to COMPLETED.")
-        return os.path.join(completed_dir, 'fwd_res', f"net0_rts_{process_id}.dat")
+
+        #return os.path.join(completed_dir, 'fwd_res', f"net0_rts_{process_id}.dat")
 
     except Exception as e:
         update_job_status(
@@ -272,4 +295,7 @@ def run_prediction_job(process_id, xml_path, fits_path,
             comment=str(e),
             end_time=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         )
-        print(f"[PIPELINE] Job {process_id} failed: {e}")
+        # Move job directory to ERROR
+        error_dir = os.path.abspath(os.path.join(JOBS_ERROR, process_id))
+        shutil.move(executing_job_dir, error_dir)
+        print(f"[PIPELINE] Job {process_id} moved to ERROR.")

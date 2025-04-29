@@ -1,9 +1,33 @@
 
+import os
+import pprint
 from astropy.io import fits
 from astropy.wcs import WCS
 
 def get_image_dim(image_path):
+    """
+    Get the dimensions and type of a FITS image.
+    
+    Parameters
+    ----------
+    image_path : str
+        Path to the FITS image file.
+    
+    Returns
+    -------
+    dict
+        A dictionary containing the type, shape, and axes of the image.
+    """
+
     # Open the image and get the header
+    print("[CLIENT][get_image_dim] Opening image:", image_path)
+    if not os.path.exists(image_path):
+        print("[CLIENT][get_image_dim] Image file does not exist.")
+        return None
+    if not image_path.endswith('.fits'):
+        print("[CLIENT][get_image_dim] Image file is not a FITS file.")
+        return None
+
     with fits.open(image_path) as hdul:
         header = hdul[0].header
         data = hdul[0].data
@@ -32,3 +56,5 @@ def get_image_dim(image_path):
             'shape': shape,
             'axes': ctype
         }
+
+        return info

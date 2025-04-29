@@ -1,7 +1,8 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-def create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model, quantization):
+def create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model,
+                     quantization, model_filename):
     """
     Crée une structure XML contenant les paramètres de la requête.
     """
@@ -25,6 +26,7 @@ def create_xml_param(user_id, ra, dec, h, w, image_path, yolo_model, quantizatio
     # Modèle YOLO et quantization
     yolo_elem = ET.SubElement(root, "YOLO_Model")
     ET.SubElement(yolo_elem, "Name").text = yolo_model
+    ET.SubElement(yolo_elem, "Filename").text = str(model_filename)
     ET.SubElement(root, "Quantization").text = str(quantization)
     
     return ET.tostring(root, encoding="utf-8", method="xml")
